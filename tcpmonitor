@@ -1,0 +1,117 @@
+#!/usr/bin/python3
+
+import sys
+import time
+import socket
+import errno
+from argparse import ArgumentParser
+
+## parse args..
+parser = ArgumentParser( description = "Use ping to monitor hosts" )
+parser.add_argument( "--ip", "-i", required=True, help="Host IP to monitor" )
+parser.add_argument( "--port", "-p", type=int, action="store", default=7, help="TCP port to connect to" )
+parser.add_argument( "--sleep", "-s", type=int, action="store", default=1, help="Seconds to sleep between checks" )
+parser.add_argument( "--log-file", "-l", action="store", help="Log to file" )
+args = parser.parse_args()
+
+
+def out( s ):
+	l = time.strftime( "%F %T" ) + " " + s
+	print( l )
+	if args.log_file:
+		with open( args.log_file, "a" ) as f:
+			f.write( l + "\n" )
+
+
+def summarize( host, prev_status, is_up, extra=None ):
+	s = "%s is %s" % ( host, [ "disconnected", "connected", "" ][ is_up ] )
+	if prev_status[ 0 ] == 2: # initial
+		return s
+	
+	s += ", was %s for" % [ "connected", "disconnected" ][ is_up ]
+	
+	seconds = int( time.time() - prev_status[ 1 ] )
+	hours, seconds =  seconds // 3600, seconds % 3600
+	minutes, seconds = seconds // 60, seconds % 60
+	
+	if hours:
+		s += " %dh" % hours
+	if minutes:
+		s += " %dm" % minutes
+	if seconds:
+		s += " %ds" % seconds
+	
+	if extra:
+		s += "  (%s)" % extra
+	
+	return s
+
+
+	
+s = None
+status = ( 2, time.time() )
+while True:
+	try:
+		if not s:
+			s = socket.socket( socket.AF_INET, socket.SOCK_STREAM )
+			s.settimeout( 1 )
+			s.connect( ( args.ip, int( args.port ) ) )
+			out( summarize( args.ip, status, True ) )
+			status = ( True, time.time() )
+		
+		s.send( b"hello" )
+		data = s.recv( 100 )
+#		if data != b"hello":
+#			out( "bad data" )
+	except ConnectionAbortedError:
+#		out( "exception ConnectionAbortedError" )
+		out( summarize( args.ip, status, False, "aborted" ) )
+		status = ( False, time.time() )
+		s.close()
+		s = None
+#	except ConnectionRefusedError:
+#		print( "exception ConnectionRefusedError" )
+#		if s:
+#			s.close()
+#			s = None
+#		pass
+#	except ConnectionResetError:
+#		print( "exception ConnectionResetError" )
+#		if s:
+#			s.close()
+#			s = None
+#		pass
+#	except ConnectionError:
+#		print( "exception ConnectionError" )
+#		if s:
+#			s.close()
+#			s = None
+#		pass
+	except socket.timeout as e:
+		if status[0] == True:
+#			out( "socket.timeout: " + str( e ) )
+			out( summarize( args.ip, status, False, "timeout" ) )
+			status = ( False, time.time() )
+		if s:
+			s.close()
+			s = None
+		pass
+	except socket.error as e:
+		out( "socket.error: " + str( e ) )
+#		import os
+#		print( os.strerror( socket.errno ) )
+#		status = ( False, time.time() )
+#		out( summarize( args.ip, status, False ) )
+		
+#		s.shutdown( 2 )
+		if s:
+			s.close()
+			s = None
+		pass
+	except Exception as e:
+		out( "exception: " + str( e ) )
+	
+	time.sleep( args.sleep )
+
+s.close()
+
